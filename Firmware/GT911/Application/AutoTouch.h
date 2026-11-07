@@ -4,6 +4,9 @@
 #define SMARTPENDANT_AUTOTOUCH_H
 #include "Display/FT6236.h"
 #include "GT911.h"
+#include <atomic>
+
+const char* PendantTouchStatus();
 class AutoTouch final : public ITouchscreen
 {
 public:
@@ -18,9 +21,14 @@ public:
     { return active_ && active_->GetXY(x, y); }
   void SetRotation(Rotation rot) override;
   Result SetCalibrationConsts(int32_t kx, int32_t ky, int32_t bx, int32_t by) override
-    { return active_ ? active_->SetCalibrationConsts(kx, ky, bx, by) : Result::ERR_INVALID_ITEM; }
+  {
+    if(active_) return active_->SetCalibrationConsts(kx, ky, bx, by);
+    return Result::ERR_INVALID_ITEM;
+  }
+  const char* Status() const { return status_.load(); }
   bool UsingGT911() const { return active_ == &gt911_; }
 private:
+  std::atomic<const char*> status_{"Touch pending"};
   IIic& bus_;
   FT6236 ft6236_;
   GT911 gt911_;

@@ -1,0 +1,68 @@
+diff --git a/Application/DevCfgUsr.h b/Application/DevCfgUsr.h
+index 5b77b66..a5c4eb6 100644
+--- a/Application/DevCfgUsr.h
++++ b/Application/DevCfgUsr.h
+@@ -40,12 +40,9 @@
+ // ***   Display Configuration   ***********************************************
+ // *****************************************************************************
+ 
+-// Max line in pixels for allocate buffer in Display Driver. Usually equal to
+-// maximum number of pixels in line. But sometimes can be greater than that.
+-// For example ILI9488 uses 18 bit color(3 bytes per pixel) and if 16 bit color
+-// is used(2 bytes per pixel) in order to prepare data display driver need 1.5
+-// times more memory
+-#define DISPLAY_MAX_BUF_LEN ((uint32_t)(480 * 1.5))
++// COLOR_24BIT draws one 32-bit pixel per buffer slot. ILI9488 packs
++// those pixels in place to RGB666. The longest panel line is 480 pixels.
++#define DISPLAY_MAX_BUF_LEN 480u
+ 
+ // Display update modes, at least one have to be defined. Top to Bottom draws
+ // the screen line by line (DrawInBufW() of every visual object). Left to Right
+diff --git a/Application/DirectControlScr.cpp b/Application/DirectControlScr.cpp
+index 90f58d4..6a4fc53 100644
+--- a/Application/DirectControlScr.cpp
++++ b/Application/DirectControlScr.cpp
+@@ -19,6 +19,7 @@
+ // ***   Includes   ************************************************************
+ // *****************************************************************************
+ #include "DirectControlScr.h"
++#include "AutoTouch.h"
+ 
+ #include "Application.h"
+ 
+@@ -110,6 +111,7 @@ Result DirectControlScr::Setup(int32_t y, int32_t height)
+   snprintf(ver_txt, sizeof(ver_txt), "SmartPendant %d.%03d.%d %luMHz", VERSION_MAJOR, VERSION_MINOR, VERSION_BUILD, crystal_freq);
+ #endif
+   // Version string
++  last_touch_status = nullptr;
+   version.SetParams(ver_txt, BORDER_W, scale_btn[0].GetEndY() + (spindle_dw.GetStartY() - scale_btn[0].GetEndY() -  Font_8x12::GetInstance().GetCharH()) / 2, COLOR_WHITE, Font_8x12::GetInstance());
+ 
+   // All good
+@@ -246,6 +248,14 @@ Result DirectControlScr::TimerExpired(uint32_t interval)
+ {
+   Result result = Result::RESULT_OK;
+ 
++  // Discovery runs in the display task and can finish after the MPG screen opens.
++  const char* status = PendantTouchStatus();
++  if(status != last_touch_status)
++  {
++    version.SetString(touch_version, sizeof(touch_version), "%s  %s", ver_txt, status);
++    last_touch_status = status;
++  }
++
+   // Update left & right button text
+   Application::GetInstance().UpdateLeftButtonText();
+   Application::GetInstance().UpdateRightButtonText();
+diff --git a/Application/DirectControlScr.h b/Application/DirectControlScr.h
+index 3891a30..c1ad1b6 100644
+--- a/Application/DirectControlScr.h
++++ b/Application/DirectControlScr.h
+@@ -83,6 +83,8 @@ class DirectControlScr : public IScreen
+     String version;
+     // Version text with oscillator frequency
+     char ver_txt[40u] = {0};
++    char touch_version[56u] = {};
++    const char* last_touch_status = nullptr;
+     // Value for speed
+     int32_t spindle_jog_val = 0;
+     // Jogging values

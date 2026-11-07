@@ -20,14 +20,31 @@ Result AutoTouch::Init()
 {
   active_ = nullptr;
   Result result = bus_.Enable();
-  if(result.IsBad()) return result;
+  if(result.IsBad())
+  {
+    status_.store("I2C error");
+    return result;
+  }
   if(bus_.IsDeviceReady(0x38u, 1u).IsGood())
   {
     result = ft6236_.Init();
-    if(result.IsGood()) { active_ = &ft6236_; return Result::RESULT_OK; }
+    if(result.IsGood())
+    {
+      active_ = &ft6236_;
+      status_.store("FT6236");
+      return result;
+    }
   }
   result = gt911_.Init();
-  if(result.IsGood()) { active_ = &gt911_; return Result::RESULT_OK; }
+  if(result.IsGood())
+  {
+    active_ = &gt911_;
+    status_.store(gt911_.Address() == 0x5Du ? "GT911 0x5D" : "GT911 0x14");
+  }
+  else
+  {
+    status_.store("No touch");
+  }
   return result;
 }
 

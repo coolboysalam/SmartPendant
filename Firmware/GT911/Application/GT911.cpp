@@ -135,13 +135,13 @@ bool GT911::GetRawXY(int32_t& x, int32_t& y)
 bool GT911::GetXY(int32_t& x, int32_t& y)
 {
   if(!GetRawXY(x, y)) return false;
-  // Same rotation rules as DevCore FT6236 (verify real panel orientation).
+  // Coordinates are zero-based, including the last pixel on each axis.
   int32_t temp;
   switch(rotation)
   {
-    case ROTATION_BOTTOM: x = width - x; y = height - y; break;
-    case ROTATION_RIGHT: temp = y; y = width - x; x = temp; break;
-    case ROTATION_LEFT: temp = x; x = height - y; y = temp; break;
+    case ROTATION_BOTTOM: x = width - 1 - x; y = height - 1 - y; break;
+    case ROTATION_RIGHT: temp = y; y = width - 1 - x; x = temp; break;
+    case ROTATION_LEFT: temp = x; x = height - 1 - y; y = temp; break;
     case ROTATION_TOP: default: break;
   }
   return true;

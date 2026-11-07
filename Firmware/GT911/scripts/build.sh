@@ -29,6 +29,7 @@ git -C "$SRC" submodule update --init --recursive
 for name in AppMain.cpp GT911.h GT911.cpp AutoTouch.h AutoTouch.cpp; do
   cp "$OVERLAY/Application/$name" "$SRC/Application/$name"
 done
+git -C "$SRC" apply "$OVERLAY/scripts/integration.patch"
 mkdir -p "$SRC/Tests"
 cp -R "$OVERLAY/Tests/host_gt911" "$SRC/Tests/host_gt911"
 

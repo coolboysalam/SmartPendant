@@ -72,6 +72,11 @@ static ILI9488 display(480, 320, spi1, display_cs, display_dc, &display_rst);
 static AutoTouch touch(iic1, TOUCH_RST_GPIO_Port, TOUCH_RST_Pin,
                        TOUCH_INT_GPIO_Port, TOUCH_INT_Pin,
                        ITouchscreen::ROTATION_LEFT, 320u, 480u);
+const char* PendantTouchStatus()
+{
+  return touch.Status();
+}
+
 // NVM: 24xx256 class I2C EEPROM, no write protection, 32 kB, 64 byte pages.
 // Early boards used MB85RC256V FRAM; it was replaced with EEPROM to cut cost,
 // so the endurance and timing characteristics are completely different:
