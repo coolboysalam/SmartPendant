@@ -1,0 +1,48 @@
+name: GT911 experimental firmware build
+
+on:
+  push:
+    branches:
+      - feature/gt911-auto-touch-experimental
+    paths:
+      - 'Firmware/GT911/**'
+      - '.github/workflows/gt911-build.yml'
+  pull_request:
+    paths:
+      - 'Firmware/GT911/**'
+      - '.github/workflows/gt911-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Mock tests and STM32F411 cross-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout this hardware fork and GT911 overlay
+        uses: actions/checkout@v4
+
+      - name: Install ARM GCC/C++ and newlib
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+
+      - name: Install CMake 4 into isolated environment
+        run: |
+          python3 -m venv "$RUNNER_TEMP/cmake-venv"
+          "$RUNNER_TEMP/cmake-venv/bin/pip" install 'cmake>=4.0,<5.0'
+          echo "$RUNNER_TEMP/cmake-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Build from pinned upstream firmware and DevCore
+        run: bash Firmware/GT911/scripts/build.sh
+
+      - name: Upload UNTESTED ELF/BIN/HEX
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartPendant-GT911-STM32F411-EXPERIMENTAL
+          path: build/gt911/artifacts/*
+          if-no-files-found: error
+          retention-days: 14

@@ -104,3 +104,9 @@ If you really like what I do and want to support my effort, you can do it using 
 https://github.com/sponsors/nickshl
 
 https://paypal.me/nickshl
+
+## Experimental GT911 capacitive-touch firmware extension
+
+An **experimental** firmware overlay adds Goodix GT911 touch support while retaining the original FT6236 driver. See [technical documentation (English)](Firmware/GT911/README.md), [توضیحات کامل فارسی](Firmware/GT911/README_FA.md), and [change log](Firmware/GT911/CHANGELOG.md).
+
+**This is not a tested firmware release.** Verify the 6-pin touch connector wiring, the 40-pin LCD ribbon pinout, voltage, backlight current limiting, and physical touch function before connecting the replacement display or flashing anything. The GitHub Actions workflow attempts a cross-build and publishes *experimental* binaries only on success.
