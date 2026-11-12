@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/gt911-auto-touch-experimental
+      - feature/pcb-height-map
     paths:
       - 'Firmware/GT911/**'
       - '.github/workflows/gt911-build.yml'
@@ -18,7 +19,7 @@ permissions:
 
 jobs:
   build:
-    name: Mock tests and STM32F411 cross-build
+    name: Touch, startup, PCB tests and STM32F411 cross-build
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -42,7 +43,7 @@ jobs:
       - name: Upload UNTESTED ELF/BIN/HEX
         uses: actions/upload-artifact@v4
         with:
-          name: SmartPendant-GT911-STM32F411-EXPERIMENTAL
+          name: SmartPendant-PCB-AutoLevel-STM32F411-EXPERIMENTAL
           path: build/gt911/artifacts/*
           if-no-files-found: error
           retention-days: 14

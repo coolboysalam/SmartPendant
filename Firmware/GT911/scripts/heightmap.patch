@@ -1,0 +1,375 @@
+--- a/Application/GrblComm.cpp
++++ b/Application/GrblComm.cpp
+@@ -83,6 +83,13 @@
+   // If status isn't received within 300 ms - something wrong.
+   if(RtosTick::GetTimeMs() - status_rx_timestamp > 300u)
+   {
++    if(grbl_state != UNKNOWN)
++    {
++      ++pcb_epoch;
++      pcb_position_valid = pcb_wco_valid = pcb_parser_valid = pcb_tlo_valid = false;
++      pcb_homed = false;
++      pcb_soft_limits = false;
++    }
+     // Since there no status received, state is Unknown
+     grbl_state = UNKNOWN;
+     // Set status_received to request status again
+@@ -1533,6 +1540,7 @@
+       }
+     }
+
++    if(state == HOME && grbl_state != HOME) { ++pcb_epoch; pcb_homed = false; }
+     // Save new state and set changed flag
+     grbl_state = (state_t)state;
+     grbl_substate = substate;
+@@ -1631,6 +1639,10 @@
+       }
+
+       // ***********************************************************************
++      case 20:
++        pcb_soft_limits = atoi(s) != 0;
++        break;
++
+       case 22:
+         if(homing != atoi(s))
+         {
+@@ -1946,6 +1958,7 @@
+           grbl_useWPos = true;
+           grbl_changed.offset = true;
+         }
++        pcb_position_valid = PcbValidAxes(line + 5);
+         grbl_changed.pos = ParseAxisData(line + 5, grbl_position);
+       }
+       else if(!strncmp(line, "MPos:", 5))
+@@ -1955,6 +1968,7 @@
+           grbl_useWPos = false;
+           grbl_changed.offset = true;
+         }
++        pcb_position_valid = PcbValidAxes(line + 5);
+         grbl_changed.pos = ParseAxisData(line + 5, grbl_position);
+       }
+       else if(!strncmp(line, "FS:", 3))
+@@ -1968,7 +1982,17 @@
+       }
+       else if(!strncmp(line, "WCO:", 4))
+       {
++        pcb_wco_valid = PcbValidAxes(line + 4);
+         ParseOffsets(line + 4);
++      }
++      else if(!strncmp(line, "H:", 2))
++      {
++        pcb_homed = line[2] == '1' && (line[3] == 0 || line[3] == '>' || line[3] == ',');
++      }
++      else if(!strncmp(line, "WCS:", 4))
++      {
++        if(!strncmp(line + 4, "G54", 3) && (line[7] == 0 || line[7] == '>')) pcb_wcs = 54;
++        else pcb_parser_valid = false;
+       }
+       else if(!strncmp(line, "Ln:", 3))
+       {
+@@ -2075,14 +2099,24 @@
+   }
+   else if(line[0] == '[')
+   {
+-    if(!strncmp(&line[1], "PRB:", 4))
++    if(!strncmp(&line[1], "GC:", 3))
++    {
++      PcbParseModal(line + 4);
++    }
++    else if(!strncmp(&line[1], "PRB:", 4))
+     {
+       ParseProbeReport(line + 1 + 4);
+     }
+     else if(!strncmp(&line[1], "TLO:", 4))
+     {
+       // Tool Length Offset
++      bool single_tlo = strchr(line + 5, ',') == nullptr;
++      char pcb_tlo[96] = {};
++      if(single_tlo) snprintf(pcb_tlo, sizeof(pcb_tlo), "0,0,%s", line + 5);
++      pcb_tlo_valid = PcbValidAxes(single_tlo ? pcb_tlo : line + 5);
+       grbl_changed.tlo = ParseAxisData(line + 1 + 4, grbl_tool_length_offset);
++      if(single_tlo && pcb_tlo_valid)
++        grbl_changed.tlo |= ParseDecimal(grbl_tool_length_offset[AXIS_Z], line + 5);
+       // It follows the tool table in "$#": publish number of tools
+       tool_table_cnt = tool_table_rx_cnt;
+     }
+@@ -2155,6 +2189,10 @@
+   }
+   else if(!strncmp(line, "Grbl", 4)) // Welcome banner: "Grbl X.Xx [...]" or "GrblHAL X.Xx [...]"
+   {
++    ++pcb_epoch;
++    pcb_position_valid = pcb_wco_valid = pcb_parser_valid = pcb_tlo_valid = false;
++    pcb_homed = false;
++    pcb_soft_limits = false;
+     // Controller (re)booted - all cached data is stale. Set state to UNKNOWN:
+     // transition out of it will trigger controller settings request.
+     grbl_state = UNKNOWN;
+@@ -2188,6 +2226,10 @@
+     // If ASCII_CAN received or buffer is full
+     if((c == ASCII_CAN) || (rx_char_cnt >= NumberOf(rx_buf) - 3u)) //  minus one for null-terminator, minus 2 for \n\r for USB debug
+     {
++      mutex.Lock();
++      ++pcb_epoch;
++      pcb_position_valid = pcb_wco_valid = pcb_parser_valid = pcb_tlo_valid = false;
++      mutex.Release();
+       rx_char_cnt = 0u;
+       skip_until_lf = true;
+     }
+--- a/Application/GrblComm.h
++++ b/Application/GrblComm.h
+@@ -774,6 +774,12 @@
+     // *************************************************************************
+     inline bool IsWorkOffsetReportEnabled() {return (status_report_options & (1u << 5u));}
+
++    Result RefreshPcbContext(uint32_t& id);
++    bool GetPcbContext(int32_t* work, int32_t* offset, uint32_t& tool,
++                       int32_t& tlo, uint32_t& epoch);
++    bool PcbMachineReady();
++
++
+     // *************************************************************************
+     // ***   Public: IsLineNumberReportEnabled   *******************************
+     // *************************************************************************
+@@ -1114,7 +1120,7 @@
+     // Give up on every command ID handed out so far. Every place that moves
+     // send_id to next_id must come through here. abort_id is written first: a
+     // reader that sees the new send_id then also sees the new abort_id.
+-    inline void AbandonCmdIds() {abort_id = next_id; send_id = next_id;}
++    inline void AbandonCmdIds() {abort_id = next_id; send_id = next_id; ++pcb_epoch;}
+
+     // Drop the command with this ID without transmitting it - the gate is
+     // closed, the write failed or we are not in control - and make it the
+@@ -1137,6 +1143,15 @@
+                  rpm_override : 1, probe: 1, tlo: 1, unassigned : 10;
+       };
+     } changes_t;
++
++    // PCB context cache. Invalidate across reset, homing and link loss.
++    uint32_t pcb_epoch = 1u;
++    uint8_t pcb_wcs = 0u;
++    bool pcb_parser_valid = false, pcb_position_valid = false;
++    bool pcb_wco_valid = false, pcb_tlo_valid = false;
++    bool pcb_homed = false, pcb_soft_limits = false;
++    static bool PcbValidAxes(const char* data);
++    void PcbParseModal(const char* data);
+
+     // GRBL state
+     state_t   grbl_state;
+--- a/Application/ProbeScr.cpp
++++ b/Application/ProbeScr.cpp
+@@ -19,6 +19,7 @@
+ // ***   Includes   ************************************************************
+ // *****************************************************************************
+ #include "ProbeScr.h"
++#include "PcbMapScr.h"
+
+ #include "Application.h"
+
+@@ -47,6 +48,11 @@
+   tab[tabs_cnt++] = &EdgeFinderTab::GetInstance();
+   tabs.SetText(tabs_cnt, "Tool", "Offset", Font_10x18::GetInstance());
+   tab[tabs_cnt++] = &ToolOffsetTab::GetInstance();
++  if(PcbMapScr* pcb = PcbMapScr::GetInstance())
++  {
++    tabs.SetText(tabs_cnt, "PCB", "Map", Font_10x18::GetInstance());
++    tab[tabs_cnt++] = pcb;
++  }
+   // Tabs for screens(second call to resize to actual numbers of pages)
+   tabs.SetParams(0, y, display_drv.GetScreenW(), 40, tabs_cnt);
+   // Set callback
+@@ -135,6 +141,7 @@
+
+   if(ptr == &right_btn)
+   {
++    if(tab_idx == 3u) tab[tab_idx]->ProcessCallback(ptr);
+     result = Result::ERR_UNHANDLED_REQUEST; // For Application to handle it
+   }
+   else if(ptr == &tabs) // Change tab when another tab selected
+--- a/Application/ProgramSender.cpp
++++ b/Application/ProgramSender.cpp
+@@ -20,6 +20,7 @@
+ // *****************************************************************************
+ #include "ProgramSender.h"
+ #include "Application.h"
++#include "PcbRuntime.h"
+
+ #include "fatfs.h"
+ #include <cctype> // For tolower()
+@@ -223,6 +224,15 @@
+ // *****************************************************************************
+ Result ProgramSender::TimerExpired(uint32_t interval)
+ {
++  if(run && pcb_job && !PcbJobAllowed(pcb_hash))
++  {
++    run = false;
++    finished = true;
++    grbl_comm.Stop();
++    msg_box.Setup("PCB MAP STALE", "Coordinate/tool/link context changed.\nRemaining program was stopped.\nVerify or scan and prepare again.", 1u);
++    msg_box.Show(10000u);
++  }
++
+   // Update left & right button text
+   Application::GetInstance().UpdateLeftButtonText();
+   Application::GetInstance().UpdateRightButtonText();
+@@ -920,6 +930,17 @@
+
+     // Open file
+     FRESULT fres = found ? f_open(&SDFile, fno.fname, FA_OPEN_EXISTING | FA_READ) : FR_NO_FILE;
++    // Recognize protected PCB output before either RAM or SD streaming mode.
++    bool opened_pcb_job = false;
++    uint32_t opened_pcb_hash = 0u;
++    if(fres == FR_OK)
++    {
++      char header[96] = {};
++      if(f_gets(header, sizeof(header), &SDFile))
++        opened_pcb_job = PcbReadJobHeader(header, opened_pcb_hash);
++      if(!strcmp(fno.fname, "PCB_LEV.NC")) opened_pcb_job = true;
++      if(f_lseek(&SDFile, 0u) != FR_OK) { f_close(&SDFile); fres = FR_DISK_ERR; }
++    }
+     // Write data to file
+     if(fres == FR_OK)
+     {
+@@ -1123,6 +1144,9 @@
+       ths.text_box.SetText("; Error open file!");
+     }
+
++    ths.pcb_job = opened_pcb_job;
++    ths.pcb_hash = opened_pcb_hash;
++
+     // Selector for this text
+     ths.ResetSelector();
+     // And show it
+@@ -1190,6 +1214,12 @@
+   // button, we have to check if Run button is active.
+   if(ptr == &left_btn)
+   {
++    if(!run && pcb_job && !PcbJobAllowed(pcb_hash))
++    {
++      msg_box.Setup("PCB MAP REQUIRED", "Scan or Load + Verify the same PCB.\nKeep G54 and tool unchanged.\nPrepare PCB_LEV.NC again if needed.", 1u);
++      msg_box.Show(10000u);
++      return Result::RESULT_OK;
++    }
+     // We should run program only if it doesn't already run, we in control,
+     // state is Idle and there is a program to run: without the line check
+     // Run with nothing loaded(or after the SD file was closed by leaving
+@@ -1415,6 +1445,8 @@
+ // *****************************************************************************
+ void ProgramSender::ReleaseDataPointer()
+ {
++  pcb_job = false;
++  pcb_hash = 0u;
+   // If buffer was previously allocated
+   if(p_text != nullptr)
+   {
+--- a/Application/ProgramSender.h
++++ b/Application/ProgramSender.h
+@@ -104,6 +104,8 @@
+     // Run flag
+     bool run = false;
+     bool finished = false;
++    bool pcb_job = false;
++    uint32_t pcb_hash = 0u;
+     // Current position
+     uint32_t idx = 0u;
+     // Current cmd ID
+--- a/Tests/host/run.py
++++ b/Tests/host/run.py
+@@ -17,6 +17,8 @@
+ for path in ["Application/Little-C.cpp", "Application/Little-C.h",
+              "Application/GrblComm.cpp", "Application/GrblComm.h",
+              "Application/FramedUart.cpp", "Application/FramedUart.h",
++             "Application/PcbGrbl.cpp", "Application/PcbHeightMap.h",
++             "Application/PcbHeightMap.cpp", "Application/PcbRuntime.h", "Application/PcbRuntime.cpp",
+              "DevCore/Framework/Result.h", "DevCore/Interfaces/IUart.h",
+              "DevCore/Math/Decimal32.h"]:
+     text = (ROOT / path).read_text()
+@@ -28,18 +30,18 @@
+ flags = [compiler, "-std=c++17", "-g", "-O1", "-fno-omit-frame-pointer",
+          "-fsanitize=address,undefined", "-fno-sanitize-recover=all", "-Wno-register", "-Wno-format",
+          "-I", str(stage)]
+-sources = [str(stage / name) for name in ["Little-C.cpp", "GrblComm.cpp", "FramedUart.cpp"]]
++sources = [str(stage / name) for name in ["Little-C.cpp", "GrblComm.cpp", "FramedUart.cpp", "PcbGrbl.cpp", "PcbHeightMap.cpp", "PcbRuntime.cpp"]]
+ # Compile the complete streaming timer against minimal UI/SD doubles; no
+ # streaming decisions are reimplemented in the harness.
+ sender = (ROOT / "Application/ProgramSender.cpp").read_text()
+ timer = sender[sender.index("Result ProgramSender::TimerExpired("):
+                sender.index("Result ProgramSender::ProcessSpeedFeed(")]
+-(stage / "sender_timer.cpp").write_text('#include "sender.h"\n' + timer)
++(stage / "sender_timer.cpp").write_text('#include "sender.h"\n#include "PcbRuntime.h"\n' + timer)
+ shutil.copy(TESTS / "sender.h", stage)
+ binary = stage / "regression"
+ subprocess.run(flags + sources + [str(stage / "sender_timer.cpp"), str(TESTS / "regression.cpp"),
+                                   "-o", str(binary)], check=True)
+-env = dict(os.environ, ASAN_OPTIONS="detect_leaks=1", UBSAN_OPTIONS="halt_on_error=1")
++env = dict(os.environ, ASAN_OPTIONS=os.environ.get("ASAN_OPTIONS", "detect_leaks=1"), UBSAN_OPTIONS="halt_on_error=1")
+ subprocess.run([str(binary)], check=True, timeout=30, env=env)
+
+ # Settings storage: the real NVM.cpp over a simulated EEPROM with power loss
+@@ -73,7 +75,7 @@
+     (baseline / name).write_bytes(content)
+ old_binary = baseline / "scripts"
+ new_binary = stage / "scripts"
+-common = [str(stage / "GrblComm.cpp"), str(stage / "FramedUart.cpp"), str(TESTS / "scripts.cpp")]
++common = [str(stage / "GrblComm.cpp"), str(stage / "FramedUart.cpp"), str(stage / "PcbGrbl.cpp"), str(TESTS / "scripts.cpp")]
+ subprocess.run(flags[:-2] + ["-I", str(baseline), "-I", str(stage), str(baseline / "Little-C.cpp")] + common
+                + ["-o", str(old_binary)], check=True)
+ subprocess.run(flags + [str(stage / "Little-C.cpp")] + common + ["-o", str(new_binary)], check=True)
+--- a/Tests/host/script_checks.py
++++ b/Tests/host/script_checks.py
+@@ -42,7 +42,7 @@
+ # ***   Build   ****************************************************************
+ # ******************************************************************************
+ RUNNER = {} # "checked": runner with sanitizers, "fast": without, "dir": scratch directory of this run
+-ENV = dict(os.environ, ASAN_OPTIONS="detect_leaks=1", UBSAN_OPTIONS="halt_on_error=1")
++ENV = dict(os.environ, ASAN_OPTIONS=os.environ.get("ASAN_OPTIONS", "detect_leaks=1"), UBSAN_OPTIONS="halt_on_error=1")
+
+ def build(mutate=None):
+     """Fresh binaries from the actual firmware sources, in a directory that is
+@@ -67,6 +67,8 @@
+     for path in ["Application/Little-C.cpp", "Application/Little-C.h",
+                  "Application/GrblComm.cpp", "Application/GrblComm.h",
+                  "Application/FramedUart.cpp", "Application/FramedUart.h",
++             "Application/PcbGrbl.cpp", "Application/PcbHeightMap.h",
++             "Application/PcbHeightMap.cpp", "Application/PcbRuntime.h", "Application/PcbRuntime.cpp",
+                  "DevCore/Framework/Result.h", "DevCore/Interfaces/IUart.h",
+                  "DevCore/Math/Decimal32.h"]:
+         text = source(path)
+@@ -79,7 +81,7 @@
+                gen.index("// ***   Private constructor")]
+     (stage / "menu_parser.cpp").write_text('#include "menu.h"\n' + part[:part.rindex("// ****")])
+     shutil.copy(TESTS / "menu.h", stage)
+-    sources = [str(stage / n) for n in ["Little-C.cpp", "GrblComm.cpp", "FramedUart.cpp", "menu_parser.cpp"]]
++    sources = [str(stage / n) for n in ["Little-C.cpp", "GrblComm.cpp", "FramedUart.cpp", "PcbGrbl.cpp", "menu_parser.cpp"]]
+     sources.append(str(TESTS / "script_runner.cpp"))
+     common = [compiler, "-std=c++17", "-Wno-register", "-Wno-format", "-I", str(stage)]
+     checked, fast = stage / "script_runner", stage / "script_runner_fast"
+--- a/Tests/host/sender.h
++++ b/Tests/host/sender.h
+@@ -86,6 +86,8 @@
+ struct ProgramSender {
+   GrblComm& grbl_comm;
+   bool run = true, finished = false;
++  bool pcb_job = false;
++  uint32_t pcb_hash = 0;
+   uint32_t id = 1;
+   int enc_val = 0;
+   const char* p_text = "G0 X1\nG0 X2\nM2";
+--- a/Application/Application.cpp
++++ b/Application/Application.cpp
+@@ -20,6 +20,7 @@
+ // *****************************************************************************
+ #include "Application.h"
+ #include "StartupSplash.h"
++#include "PcbMapScr.h"
+
+ // *****************************************************************************
+ // ***   Public: Get Instance   ************************************************
+@@ -552,6 +553,8 @@
+ // *****************************************************************************
+ void Application::InitHeader()
+ {
++  // Reserve PCB UI memory before Program Sender can allocate a large job.
++  PcbMapScr::GetInstance();
+   // Hide header
+   header.Hide();
+   // Pages for screens(first call to set parameters)

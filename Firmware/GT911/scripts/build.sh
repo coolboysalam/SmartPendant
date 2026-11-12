@@ -10,7 +10,7 @@ SRC="$ROOT/build/gt911/firmware"
 OUT="$ROOT/build/gt911/out"
 ART="$ROOT/build/gt911/artifacts"
 
-for command in git cmake c++ arm-none-eabi-gcc arm-none-eabi-g++ arm-none-eabi-objcopy; do
+for command in git cmake c++ python3 arm-none-eabi-gcc arm-none-eabi-g++ arm-none-eabi-objcopy; do
   command -v "$command" >/dev/null 2>&1 || { echo "ERROR: missing $command" >&2; exit 2; }
 done
 
@@ -29,15 +29,24 @@ git -C "$SRC" submodule update --init --recursive
 for name in AppMain.cpp GT911.h GT911.cpp AutoTouch.h AutoTouch.cpp StartupSplash.h StartupSplash.cpp StartupLogoData.h; do
   cp "$OVERLAY/Application/$name" "$SRC/Application/$name"
 done
+for file in "$OVERLAY"/Application/Pcb*; do
+  cp "$file" "$SRC/Application/"
+done
 git -C "$SRC" apply "$OVERLAY/scripts/integration.patch"
 git -C "$SRC" apply "$OVERLAY/scripts/splash.patch"
+git -C "$SRC" apply "$OVERLAY/scripts/heightmap.patch"
 mkdir -p "$SRC/Tests"
 cp -R "$OVERLAY/Tests/host_gt911" "$SRC/Tests/host_gt911"
 cp -R "$OVERLAY/Tests/host_startup" "$SRC/Tests/host_startup"
+cp -R "$OVERLAY/Tests/host_pcb" "$SRC/Tests/host_pcb"
 
 echo "Running isolated host tests..."
 (cd "$SRC" && sh Tests/host_gt911/run.sh)
 (cd "$SRC" && sh Tests/host_startup/run.sh)
+(cd "$SRC" && sh Tests/host_pcb/run_core.sh)
+(cd "$SRC" && python3 Tests/host_pcb/run_control.py)
+(cd "$SRC" && python3 Tests/host/run.py)
+(cd "$SRC" && python3 Tests/host/script_checks.py)
 
 echo "Building STM32F411CEUx firmware..."
 cmake -S "$SRC" -B "$OUT" -DCMAKE_TOOLCHAIN_FILE="$SRC/cmake/arm_none_eabi_gcc.cmake" -DCMAKE_BUILD_TYPE=Release
