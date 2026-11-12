@@ -26,15 +26,18 @@ git -C "$SRC" checkout --quiet --detach "$FW_REF"
 git -C "$SRC" submodule update --init --recursive
 [[ "$(git -C "$SRC/DevCore" rev-parse HEAD)" == "$DEVCORE_REF" ]] || { echo 'Wrong DevCore revision' >&2; exit 2; }
 
-for name in AppMain.cpp GT911.h GT911.cpp AutoTouch.h AutoTouch.cpp; do
+for name in AppMain.cpp GT911.h GT911.cpp AutoTouch.h AutoTouch.cpp StartupSplash.h StartupSplash.cpp StartupLogoData.h; do
   cp "$OVERLAY/Application/$name" "$SRC/Application/$name"
 done
 git -C "$SRC" apply "$OVERLAY/scripts/integration.patch"
+git -C "$SRC" apply "$OVERLAY/scripts/splash.patch"
 mkdir -p "$SRC/Tests"
 cp -R "$OVERLAY/Tests/host_gt911" "$SRC/Tests/host_gt911"
+cp -R "$OVERLAY/Tests/host_startup" "$SRC/Tests/host_startup"
 
 echo "Running isolated host tests..."
 (cd "$SRC" && sh Tests/host_gt911/run.sh)
+(cd "$SRC" && sh Tests/host_startup/run.sh)
 
 echo "Building STM32F411CEUx firmware..."
 cmake -S "$SRC" -B "$OUT" -DCMAKE_TOOLCHAIN_FILE="$SRC/cmake/arm_none_eabi_gcc.cmake" -DCMAKE_BUILD_TYPE=Release

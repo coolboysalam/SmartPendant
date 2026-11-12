@@ -1,0 +1,88 @@
+--- a/Application/Application.cpp
++++ b/Application/Application.cpp
+@@ -19,6 +19,7 @@
+ // ***   Includes   ************************************************************
+ // *****************************************************************************
+ #include "Application.h"
++#include "StartupSplash.h"
+
+ // *****************************************************************************
+ // ***   Public: Get Instance   ************************************************
+@@ -34,16 +35,18 @@
+ // *****************************************************************************
+ Result Application::Setup()
+ {
+-  // Settings are already read in AppMain() before the task is started
+-  // because UART mode depends on them - only the result is needed there
++  display_drv.InvertDisplay(NVM::GetInstance().GetValue(NVM::SCREEN_INVERT));
++  display_drv.SetRotation((IDisplay::Rotation)rotation);
++  grbl_comm.ReleaseControl();
++  BeginStartupSplash(display_drv);
++  return Result::RESULT_OK;
++}
++
++// Normal UI/input setup follows the non-blocking startup screen. NVM errors
++// and AUTO_MPG_ON_START keep the original behavior after the splash finishes.
++Result Application::SetupScreens()
++{
+   Result nvm_result = NVM::GetInstance().GetReadResult();
+-
+-  // Set display inversion if needed
+-  display_drv.InvertDisplay(NVM::GetInstance().GetValue(NVM::SCREEN_INVERT));
+-  // Set display rotation
+-  display_drv.SetRotation((IDisplay::Rotation)rotation);
+-  // Set display background color
+-  display_drv.SetBackgroundColor(COLOR_DARKGREY);
+
+   // Box for status
+   status_box.SetParams(0, display_drv.GetScreenH() - Font_8x12::GetInstance().GetCharH() * 3 - Font_12x16::GetInstance().GetCharH() * 2 - 2, display_drv.GetScreenW() - Font_12x16::GetInstance().GetCharW() * 6, Font_12x16::GetInstance().GetCharH() * 2, COLOR_GREY, false);
+@@ -53,8 +56,6 @@
+   msg_box.Setup("", "");
+   msg_box.SetCallback(this);
+
+-  // Release control by default at startup
+-  grbl_comm.ReleaseControl();
+   // MPG button
+   mpg_btn.SetParams("MPG", display_drv.GetScreenW() - Font_12x16::GetInstance().GetCharW() * 6 - 1, status_box.GetStartY(), Font_12x16::GetInstance().GetCharW() * 6, status_box.GetHeight(), true);
+   mpg_btn.SetCallback(this);
+@@ -143,6 +144,19 @@
+ // *****************************************************************************
+ Result Application::TimerExpired(uint32_t missed_cnt)
+ {
++  if(startup_pending)
++  {
++    if(UpdateStartupSplash(display_drv))
++    {
++      display_drv.UpdateDisplay();
++      return Result::RESULT_OK;
++    }
++    startup_pending = false;
++    Result result = SetupScreens();
++    display_drv.UpdateDisplay();
++    return result;
++  }
++
+   // Update state & status
+   state_str.SetString(grbl_comm.GetCurrentStateName());
+   status_str.SetString(grbl_comm.GetCurrentStatusName());
+@@ -254,6 +268,8 @@
+ // *****************************************************************************
+ Result Application::ProcessCallback(const void* ptr)
+ {
++  if(startup_pending) return Result::RESULT_OK;
++
+   Result result = Result::RESULT_OK;
+
+   // Check if it MPG button and it is enabled
+--- a/Application/Application.h
++++ b/Application/Application.h
+@@ -187,6 +187,9 @@
+     void DisableScreenChange() {header.Disable(); mpg_btn.Disable();}
+
+   private:
++    Result SetupScreens();
++    bool startup_pending = true;
++
+     // Timer period
+     static const uint32_t TASK_TIMER_PERIOD_MS = 20u;
+     // Border width
